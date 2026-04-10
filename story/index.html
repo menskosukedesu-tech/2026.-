@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Instagram Story Creator | @ko__sukedesu</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;700&family=Noto+Serif+JP:wght@700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0A0A0A;
+      color: #F5F0E8;
+      font-family: 'Noto Sans JP', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 32px 20px 48px;
+    }
+
+    h1 {
+      font-size: 14px;
+      font-weight: 300;
+      letter-spacing: 0.25em;
+      color: #C9A84C;
+      text-transform: uppercase;
+      margin-bottom: 32px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 32px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #C9A84C;
+      color: #0A0A0A;
+      border: none;
+      padding: 12px 28px;
+      font-size: 14px;
+      font-weight: 700;
+      font-family: 'Noto Sans JP', sans-serif;
+      letter-spacing: 0.05em;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: #E8C96A; }
+    .btn.secondary {
+      background: transparent;
+      border: 1px solid #C9A84C;
+      color: #C9A84C;
+    }
+    .btn.secondary:hover { background: rgba(201,168,76,0.1); }
+
+    input[type="file"] { display: none; }
+
+    .canvas-wrap {
+      position: relative;
+      border: 1px solid rgba(201,168,76,0.2);
+    }
+
+    canvas {
+      display: block;
+      /* Preview: 405×720 (= 1080×1920 × 0.375) */
+      width: 405px;
+      height: 720px;
+    }
+
+    .note {
+      margin-top: 20px;
+      font-size: 12px;
+      color: #5A5040;
+      text-align: center;
+      line-height: 1.8;
+    }
+    .note span { color: #C9A84C; }
+  </style>
+</head>
+<body>
+
+  <h1>Instagram Story Generator</h1>
+
+  <div class="controls">
+    <label for="photoInput" class="btn">
+      ＋ 写真を選択
+    </label>
+    <input type="file" id="photoInput" accept="image/*">
+    <button class="btn secondary" id="previewBtn">プレビュー更新</button>
+    <button class="btn" id="downloadBtn">↓ ダウンロード (1080×1920)</button>
+  </div>
+
+  <div class="canvas-wrap">
+    <canvas id="story" width="1080" height="1920"></canvas>
+  </div>
+
+  <p class="note">
+    ※ このツールはブラウザ上で動作します。写真はサーバーに送信されません。<br>
+    出力サイズ: <span>1080 × 1920px</span>（Instagram ストーリー推奨サイズ）
+  </p>
+
+  <script>
+    /* ─────────────────────────────────────────
+       CONSTANTS
+    ───────────────────────────────────────── */
+    const W = 1080;
+    const H = 1920;
+    const GOLD        = '#C9A84C';
+    const GOLD_LIGHT  = '#E8C96A';
+    const WHITE       = '#F5F0E8';
+    const WHITE_DIM   = 'rgba(245,240,232,0.75)';
+
+    const canvas = document.getElementById('story');
+    const ctx    = canvas.getContext('2d');
+
+    let userImage = null;
+
+    /* ─────────────────────────────────────────
+       FONTS
+       Canvas uses the system font stack.
+       We load Google Fonts into the page so
+       they get cached before the first draw.
+    ───────────────────────────────────────── */
+    const SERIF = '"Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", Georgia, serif';
+    const SANS  = '"Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif';
+
+    /* ─────────────────────────────────────────
+       HELPERS
+    ───────────────────────────────────────── */
+    function drawCoverImage(img) {
+      const imgRatio    = img.width  / img.height;
+      const canvasRatio = W / H;
+      let dw, dh, dx, dy;
+
+      if (imgRatio > canvasRatio) {
+        // Image is wider than canvas → fit height, crop sides
+        dh = H;
+        dw = H * imgRatio;
+        dx = (W - dw) / 2;
+        dy = 0;
+      } else {
+        // Image is taller (portrait) → fit width, crop top/bottom
+        dw = W;
+        dh = W / imgRatio;
+        dx = 0;
+        // Portrait photo: keep face area — shift upward slightly
+        dy = -(dh - H) * 0.15;
+      }
+      ctx.drawImage(img, dx, dy, dw, dh);
+    }
+
+    function gradientRect(x, y, w, h, stops) {
+      const grd = ctx.createLinearGradient(x, y, x, y + h);
+      stops.forEach(([pos, color]) => grd.addColorStop(pos, color));
+      ctx.fillStyle = grd;
+      ctx.fillRect(x, y, w, h);
+    }
+
+    function text(str, x, y, opts = {}) {
+      const {
+        font    = `400 60px ${SANS}`,
+        color   = WHITE,
+        align   = 'center',
+        alpha   = 1,
+        shadow  = false,
+        shadowColor = 'rgba(0,0,0,0.6)',
+        shadowBlur  = 24,
+      } = opts;
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.font        = font;
+      ctx.fillStyle   = color;
+      ctx.textAlign   = align;
+      ctx.textBaseline = 'alphabetic';
+
+      if (shadow) {
+        ctx.shadowColor = shadowColor;
+        ctx.shadowBlur  = shadowBlur;
+      }
+
+      ctx.fillText(str, x, y);
+      ctx.restore();
+    }
+
+    function hline(y, opts = {}) {
+      const { x1 = W/2 - 160, x2 = W/2 + 160, color = GOLD, alpha = 0.45 } = opts;
+      ctx.save();
+      ctx.globalAlpha  = alpha;
+      ctx.strokeStyle  = color;
+      ctx.lineWidth    = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x1, y);
+      ctx.lineTo(x2, y);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    /* ─────────────────────────────────────────
+       MAIN DRAW
+    ───────────────────────────────────────── */
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+
+      /* 1 ── BACKGROUND PHOTO ── */
+      if (userImage) {
+        drawCoverImage(userImage);
+      } else {
+        // Placeholder
+        ctx.fillStyle = '#1C1C1C';
+        ctx.fillRect(0, 0, W, H);
+        text('写真を選択してください', W/2, H/2, {
+          font: `300 52px ${SANS}`,
+          color: '#5A5040',
+        });
+      }
+
+      /* 2 ── GRADIENT OVERLAYS ── */
+
+      // Top vignette (for top labels)
+      gradientRect(0, 0, W, 520, [
+        [0,   'rgba(0,0,0,0.72)'],
+        [0.6, 'rgba(0,0,0,0.18)'],
+        [1,   'rgba(0,0,0,0)'],
+      ]);
+
+      // Bottom heavy overlay (for main copy & CTA)
+      gradientRect(0, H - 860, W, 860, [
+        [0,    'rgba(0,0,0,0)'],
+        [0.25, 'rgba(0,0,0,0.55)'],
+        [0.7,  'rgba(0,0,0,0.88)'],
+        [1,    'rgba(0,0,0,0.96)'],
+      ]);
+
+      /* 3 ── TOP AREA ── */
+
+      // Label bar
+      text('MENS PERM SPECIALIST  ·  神戸三宮', W/2, 108, {
+        font:  `300 42px ${SANS}`,
+        color: GOLD,
+        alpha: 0.9,
+        shadow: true,
+        shadowBlur: 20,
+      });
+
+      // Thin gold bar under label
+      hline(130, { x1: W/2 - 260, x2: W/2 + 260, alpha: 0.3 });
+
+      // Photographer credit area — subtle
+      text('@ko__sukedesu', W/2, 198, {
+        font:  `300 48px ${SANS}`,
+        color: WHITE_DIM,
+        shadow: true,
+      });
+
+      /* 4 ── MAIN COPY (bottom area) ── */
+      const BASE_Y = H - 730;
+
+      // ── Hook line ──
+      text('「おまかせします」しか', W/2, BASE_Y, {
+        font:  `300 64px ${SERIF}`,
+        color: WHITE_DIM,
+        shadow: true,
+        shadowBlur: 30,
+      });
+      text('言えなかった人へ。', W/2, BASE_Y + 88, {
+        font:  `700 64px ${SERIF}`,
+        color: WHITE,
+        shadow: true,
+        shadowBlur: 30,
+      });
+
+      // Spacer line
+      hline(BASE_Y + 136, { alpha: 0.35, x1: W/2 - 200, x2: W/2 + 200 });
+
+      // ── Value prop ──
+      text('あなたの30%の言葉から', W/2, BASE_Y + 226, {
+        font:  `300 68px ${SERIF}`,
+        color: WHITE,
+        shadow: true,
+        shadowBlur: 24,
+      });
+
+      // "100%へ。" — large gold emphasis
+      ctx.save();
+      ctx.font      = `700 148px ${SERIF}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.shadowColor  = 'rgba(201,168,76,0.5)';
+      ctx.shadowBlur   = 40;
+
+      // Gold gradient fill for big text
+      const goldGrad = ctx.createLinearGradient(W/2 - 200, 0, W/2 + 200, 0);
+      goldGrad.addColorStop(0,   '#8B6914');
+      goldGrad.addColorStop(0.4, GOLD);
+      goldGrad.addColorStop(0.7, GOLD_LIGHT);
+      goldGrad.addColorStop(1,   GOLD);
+      ctx.fillStyle = goldGrad;
+      ctx.fillText('100%へ。', W/2, BASE_Y + 420);
+      ctx.restore();
+
+      // ── Sub copy ──
+      text('うまく伝えられなくても大丈夫。', W/2, BASE_Y + 518, {
+        font:  `300 52px ${SANS}`,
+        color: WHITE_DIM,
+        shadow: true,
+      });
+
+      /* 5 ── CTA ── */
+      const CTA_Y = H - 130;
+
+      // Background pill for CTA
+      const pillW = 660, pillH = 90, pillR = 45;
+      const pillX = (W - pillW) / 2;
+      const pillY = CTA_Y - 64;
+      ctx.save();
+      ctx.fillStyle = 'rgba(201,168,76,0.18)';
+      ctx.strokeStyle = GOLD;
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.9;
+      roundRect(ctx, pillX, pillY, pillW, pillH, pillR);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      // Arrow up
+      text('↑', W/2 - 260, CTA_Y - 8, {
+        font:  `700 56px ${SANS}`,
+        color: GOLD,
+        shadow: true,
+        shadowColor: 'rgba(201,168,76,0.6)',
+        shadowBlur: 16,
+      });
+
+      text('プロフィールをチェック', W/2 + 28, CTA_Y - 8, {
+        font:  `700 52px ${SANS}`,
+        color: WHITE,
+        alpha: 0.95,
+      });
+    }
+
+    /* ─────────────────────────────────────────
+       ROUND RECT POLYFILL
+    ───────────────────────────────────────── */
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    }
+
+    /* ─────────────────────────────────────────
+       EVENTS
+    ───────────────────────────────────────── */
+    document.getElementById('photoInput').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        userImage = img;
+        // Wait for Google Fonts to be ready before drawing
+        document.fonts.ready.then(draw);
+      };
+      img.src = url;
+    });
+
+    document.getElementById('previewBtn').addEventListener('click', () => {
+      document.fonts.ready.then(draw);
+    });
+
+    document.getElementById('downloadBtn').addEventListener('click', () => {
+      const link      = document.createElement('a');
+      link.download   = 'story_ko__sukedesu.png';
+      link.href       = canvas.toDataURL('image/png');
+      link.click();
+    });
+
+    /* Initial render */
+    document.fonts.ready.then(draw);
+  </script>
+</body>
+</html>
